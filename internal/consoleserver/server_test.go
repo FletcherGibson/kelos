@@ -1611,6 +1611,7 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 	for description, expected := range map[string]string{
 		"dynamic viewport height":            `height: 100dvh`,
 		"desktop sidebar width":              `grid-template-columns: 260px minmax(0, 1fr)`,
+		"desktop conversation column":        `.conversation { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr);`,
 		"desktop active request width":       `.current-request { z-index: 2; grid-row: 2; grid-column: 1; width: min(calc(100% - 48px), 960px);`,
 		"desktop transcript width":           `.messages { min-height: 0; grid-row: 2; grid-column: 1; overflow-y: auto; padding: 28px max(24px, calc((100% - 960px) / 2)) 36px;`,
 		"desktop composer width":             `.composer-wrap { position: relative; z-index: 2; min-width: 0; grid-row: 3; padding: 12px max(24px, calc((100% - 960px) / 2)) 10px;`,
