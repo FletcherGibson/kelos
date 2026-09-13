@@ -467,6 +467,8 @@ const elements = requireElements({
   openSidebar: document.querySelector('#open-sidebar'),
   closeSidebar: document.querySelector('#close-sidebar'),
   sidebarScrim: document.querySelector('#sidebar-scrim'),
+  consoleSettings: document.querySelector('#console-settings'),
+  settingsButton: document.querySelector('#console-settings-button'),
   browserAlerts: document.querySelector('#browser-alerts'),
   browserAlertsStatus: document.querySelector('#browser-alerts-status'),
   toast: document.querySelector('#toast'),
@@ -602,6 +604,16 @@ function showToast(message: string) {
 const browserAlertsStorageKey = 'kelos-console-browser-alerts';
 const browserNotifications = new Map<string, Notification>();
 
+function bindConsoleSettings() {
+  const settings = elements.consoleSettings;
+  settings.addEventListener('toggle', () => {
+    if (settings.open) renderBrowserAlerts();
+  });
+  document.addEventListener('pointerdown', event => {
+    if (!settings.contains(event.target as Node | null)) settings.open = false;
+  });
+}
+
 function browserAlertSupportError() {
   if (!window.isSecureContext) return 'Browser alerts require HTTPS or localhost.';
   if (typeof window.Notification !== 'function') return 'This browser does not support browser alerts.';
@@ -613,11 +625,11 @@ function renderBrowserAlerts() {
   const blocked = !unavailable && Notification.permission === 'denied';
   const enabled = !unavailable && state.browserAlertsEnabled && Notification.permission === 'granted';
   elements.browserAlerts.disabled = Boolean(unavailable || blocked || state.browserAlertsPending);
-  elements.browserAlerts.setAttribute('aria-pressed', String(Boolean(enabled)));
-  elements.browserAlerts.textContent = `Browser alerts: ${unavailable ? 'Unavailable' : blocked ? 'Blocked' : state.browserAlertsPending ? 'Enabling…' : enabled ? 'On' : 'Off'}`;
+  elements.browserAlerts.checked = Boolean(enabled);
   elements.browserAlertsStatus.textContent = unavailable || (blocked
     ? 'Allow notifications in your browser’s site settings to enable alerts.'
-    : 'Notify when the connected Session needs input or finishes while you’re away. Keep this tab open.');
+    : state.browserAlertsPending ? 'Waiting for browser permission…' : '');
+  elements.browserAlertsStatus.hidden = !elements.browserAlertsStatus.textContent;
 }
 
 function closeBrowserNotifications() {
@@ -5629,6 +5641,7 @@ requiredElement('#logout').addEventListener('click', async () => {
 });
 function setSidebarOpen(open: boolean) {
   elements.sidebar.classList.toggle('open', open);
+  if (!open) elements.consoleSettings.open = false;
   for (const button of document.querySelectorAll('.open-sidebar-button')) {
     button.setAttribute('aria-expanded', String(open));
   }
@@ -5651,6 +5664,12 @@ document.addEventListener('pointerdown', event => {
   closeSessionActionsMenu();
 });
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && elements.consoleSettings.open) {
+    event.preventDefault();
+    elements.consoleSettings.open = false;
+    elements.settingsButton.focus();
+    return;
+  }
   if (event.key === 'Escape' && !elements.sessionActionsMenu.hidden) {
     event.preventDefault();
     closeSessionActionsMenu(true);
@@ -5659,7 +5678,8 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && elements.sidebar.classList.contains('open')) setSidebarOpen(false);
 });
 
-elements.browserAlerts.addEventListener('click', toggleBrowserAlerts);
+bindConsoleSettings();
+elements.browserAlerts.addEventListener('change', toggleBrowserAlerts);
 window.addEventListener('focus', renderBrowserAlerts);
 window.addEventListener('pagehide', closeBrowserNotifications);
 window.addEventListener('storage', event => {

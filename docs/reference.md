@@ -609,7 +609,9 @@ connect to Sessions across namespaces while operating on one active namespace
 at a time. Users can switch the active namespace live from the sidebar.
 `consoleServer.defaultNamespace` sets its initial value, and resource inventory,
 Session form options, and credential options are loaded only from the active namespace.
-Select **Browser alerts: Off** in the sidebar to opt in to browser notifications.
+Open **Settings** using the gear icon in the sidebar footer, then enable
+**Browser notifications** to opt in. The Settings popover also shows permission
+or browser-support guidance when needed. Press Escape or click outside to close it.
 Alerts cover input requests and completed or failed work in the connected Session
 when you are away from its conversation, including in another console view,
 browser tab, or application. Clicking an alert opens that Session if it is still

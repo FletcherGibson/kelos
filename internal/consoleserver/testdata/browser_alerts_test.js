@@ -27,6 +27,15 @@ let selected;
 let view;
 let storage;
 
+function eventTarget(values = {}) {
+  const listeners = new Map();
+  return {
+    ...values,
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    dispatch(type, event = {}) { listeners.get(type)?.(event); },
+  };
+}
+
 class TestNotification {
   static permission = 'granted';
   static requestPermission = async () => {
@@ -72,9 +81,14 @@ function resetHarness() {
       setItem: (key, value) => storage.set(key, value),
     },
   };
-  global.document = {visibilityState: 'hidden', hasFocus: () => false};
+  global.document = eventTarget({visibilityState: 'hidden', hasFocus: () => false});
   global.elements = {
-    browserAlerts: {setAttribute(name, value) { this[name] = value; }},
+    consoleSettings: eventTarget({
+      open: false,
+      contains: target => target === elements.browserAlerts || target === elements.settingsButton,
+    }),
+    settingsButton: {focus() { this.focused = true; }},
+    browserAlerts: {},
     browserAlertsStatus: {},
     messages: {hidden: false},
   };
@@ -111,7 +125,8 @@ async function testPreferenceAndPermission() {
   resetHarness();
   loadBrowserAlertPreference();
   assert.equal(state.browserAlertsEnabled, false, 'Browser permission alone must not opt in');
-  assert.equal(elements.browserAlerts.textContent, 'Browser alerts: Off');
+  assert.equal(elements.browserAlerts.checked, false);
+  assert.equal(elements.browserAlertsStatus.hidden, true);
   assert.equal(permissionRequests, 0);
 
   TestNotification.permission = 'default';
@@ -119,8 +134,8 @@ async function testPreferenceAndPermission() {
   assert.equal(permissionRequests, 1);
   assert.equal(state.browserAlertsEnabled, true);
   assert.equal(storage.get('kelos-console-browser-alerts'), 'true');
-  assert.equal(elements.browserAlerts.textContent, 'Browser alerts: On');
-  assert.equal(elements.browserAlerts['aria-pressed'], 'true');
+  assert.equal(elements.browserAlerts.checked, true);
+  assert.equal(elements.browserAlertsStatus.hidden, true);
 
   state.browserAlertsEnabled = false;
   loadBrowserAlertPreference();
@@ -132,7 +147,47 @@ async function testPreferenceAndPermission() {
   assert.equal(state.browserAlertsEnabled, false);
   assert.equal(storage.get('kelos-console-browser-alerts'), 'false');
   assert.equal(notifications[0].closed, true);
-  assert.equal(elements.browserAlerts['aria-pressed'], 'false');
+  assert.equal(elements.browserAlerts.checked, false);
+}
+
+function testSettingsPopoverInteractions() {
+  resetHarness();
+  bindConsoleSettings();
+  vm.runInThisContext(applicationSlice("document.addEventListener('keydown', event => {", 'bindConsoleSettings();'));
+  const settings = elements.consoleSettings;
+
+  settings.open = true;
+  settings.dispatch('toggle');
+  assert.equal(elements.browserAlerts.checked, true);
+  assert.equal(permissionRequests, 0, 'Opening Settings must not request permission');
+
+  TestNotification.permission = 'denied';
+  settings.dispatch('toggle');
+  assert.equal(elements.browserAlerts.checked, false);
+  assert.equal(elements.browserAlerts.disabled, true);
+  assert.equal(elements.browserAlertsStatus.hidden, false);
+  assert.equal(elements.browserAlertsStatus.textContent, 'Allow notifications in your browser’s site settings to enable alerts.');
+
+  document.dispatch('pointerdown', {target: elements.browserAlerts});
+  assert.equal(settings.open, true, 'Interacting with the setting must keep the popover open');
+  document.dispatch('pointerdown', {target: elements.settingsButton});
+  assert.equal(settings.open, true, 'The summary handles its own toggle');
+  document.dispatch('pointerdown', {target: {}});
+  assert.equal(settings.open, false, 'Clicking outside must close the popover');
+  assert.equal(elements.settingsButton.focused, undefined, 'Outside clicks must not steal focus');
+
+  settings.open = true;
+  document.dispatch('keydown', {key: 'Tab'});
+  assert.equal(settings.open, true);
+  let prevented = false;
+  document.dispatch('keydown', {
+    key: 'Escape',
+    target: {},
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(settings.open, false);
+  assert.equal(elements.settingsButton.focused, true);
+  assert.equal(prevented, true);
 }
 
 async function testPermissionFailures() {
@@ -166,6 +221,8 @@ async function testPermissionFailures() {
   };
   const pending = toggleBrowserAlerts();
   assert.equal(elements.browserAlerts.disabled, true);
+  assert.equal(elements.browserAlertsStatus.hidden, false);
+  assert.equal(elements.browserAlertsStatus.textContent, 'Waiting for browser permission…');
   await toggleBrowserAlerts();
   assert.equal(permissionRequests, 1);
   TestNotification.permission = 'granted';
@@ -332,13 +389,16 @@ async function testUnavailableStorageAndNotification() {
   };
   handleEvent({id: 1, type: 'turn.completed', status: 'completed'});
   assert.equal(rendered.length, 1, 'Notification failures must not break the conversation');
-  assert.equal(elements.browserAlerts.textContent, 'Browser alerts: Unavailable');
+  assert.equal(elements.browserAlerts.checked, false);
+  assert.equal(elements.browserAlertsStatus.hidden, false);
+  assert.equal(elements.browserAlertsStatus.textContent, 'This browser could not display alerts from the console.');
   assert.equal(elements.browserAlerts.disabled, true);
   assert.equal(toasts.at(-1), 'Could not display browser alert: Page notifications unavailable');
 }
 
 (async () => {
   await testPreferenceAndPermission();
+  testSettingsPopoverInteractions();
   await testPermissionFailures();
   testLiveEventsAndClick();
   testHistoryAndIrrelevantEvents();
