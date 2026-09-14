@@ -234,7 +234,7 @@ button { color: inherit; }
 .resource-row-phase[data-state="ready"], .resource-row-phase[data-state="succeeded"] { background: var(--accent-soft); color: var(--accent-2); }
 .resource-row-phase[data-state="failed"] { background: #f8e8e8; color: var(--danger); }
 .resource-empty { min-height: 210px; display: grid; place-items: center; padding: 28px; color: var(--muted); font-size: 12px; text-align: center; }
-.conversation { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--canvas); }
+.conversation { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--canvas); }
 .conversation[hidden] { display: none; }
 .conversation-header { position: relative; z-index: 3; grid-row: 1; min-height: 60px; display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: color-mix(in srgb, var(--canvas) 92%, transparent); backdrop-filter: blur(12px); }
 .session-heading { flex: 1; min-width: 0; }
