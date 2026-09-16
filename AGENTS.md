@@ -35,6 +35,8 @@
 ## Pull Requests
 - **Always follow `.github/PULL_REQUEST_TEMPLATE.md`** when creating PRs.
 - Fill in every section of the template. Do not remove or skip sections — use "N/A" or "NONE" where appropriate.
+- When a PR includes UI changes, include clearly labeled before and after screenshots in the PR description. Use recordings when needed to show interaction changes, and capture the same view and state so reviewers can compare them directly.
+- Do not commit screenshots or recordings used only in PR descriptions to the repository. Upload them as PR attachments.
 - Choose exactly one `/kind` label from: `api`, `bug`, `cleanup`, `docs`, `feature`.
 - PRs that modify files under `api/` must use `/kind api`.
 - If there is no associated issue, write "N/A" under the issue section.
