@@ -953,7 +953,7 @@ func TestApplicationRendersMarkdownSafely(t *testing.T) {
 		`block.className = 'code-block'`,
 		`const pre = document.createElement('pre')`,
 		`const code = document.createElement('code')`,
-		`copyButton.addEventListener('click', () => copyCodeBlock(copyButton, content))`,
+		`copyButton.addEventListener('click', () => copyCodeBlock(copyButton, block.querySelector('code')?.textContent || ''))`,
 		`await globalThis.navigator.clipboard.writeText(text)`,
 		`document.execCommand('copy')`,
 		`if (/^[a-z0-9_+-]+$/i.test(language))`,
@@ -971,7 +971,7 @@ func TestApplicationRendersMarkdownSafely(t *testing.T) {
 		`appendInlineMarkdown(link, label, depth + 1, false, scanBudget)`,
 		`completedAssistantText(event.text, state.assistantTextByTurn.get(key))`,
 		`state.assistantTextByTurn.set(key, text)`,
-		`renderMessageMarkdown(bubble, state.assistantTextByTurn.get(key) || '')`,
+		`finishAssistantMarkdown(bubble, state.assistantTextByTurn.get(key) || '')`,
 	} {
 		if !strings.Contains(string(javascript), expected) {
 			t.Errorf("Markdown rendering JavaScript does not contain %q", expected)

@@ -40,6 +40,10 @@ class TestNode {
     return this.children.length > 0;
   }
 
+  contains(node) {
+    return this === node || this.children.some((child) => child.contains(node));
+  }
+
   removeChild(node) {
     const index = this.children.indexOf(node);
     if (index >= 0) this.children.splice(index, 1);
@@ -306,6 +310,7 @@ global.acceptPendingMessage = () => {};
 global.renderInputRequest = () => {};
 global.resolveInputCard = () => {};
 global.scrollToBottom = () => {};
+global.messagesNearBottom = () => true;
 global.interruptActiveTurn = () => { interruptRequests++; };
 global.showToast = (message) => { toasts.push(message); };
 global.notifySessionEvent = () => {};

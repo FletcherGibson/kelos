@@ -3184,7 +3184,7 @@ function appendCodeBlock(parent, content, info) {
   copyButton.textContent = 'Copy';
   copyButton.setAttribute('aria-label', 'Copy code block');
   copyButton.setAttribute('aria-live', 'polite');
-  copyButton.addEventListener('click', () => copyCodeBlock(copyButton, content));
+  copyButton.addEventListener('click', () => copyCodeBlock(copyButton, block.querySelector('code')?.textContent || ''));
 
   const pre = document.createElement('pre');
   const code = document.createElement('code');
@@ -3366,14 +3366,16 @@ function appendInlineMarkdown(parent: ParentNode, value: string, depth = 0, allo
     const possibleScheme = value.slice(index, index + 8).toLowerCase();
     if (allowLinks && (possibleScheme.startsWith('http://') || possibleScheme.startsWith('https://'))) {
       const match = value.slice(index).match(/^https?:\/\/[^\s<>"']+/i);
-      const linkText = trimURLSuffix(match![0]);
-      const holder = document.createDocumentFragment();
-      if (appendLink(holder, linkText, linkText, depth, scanBudget)) {
-        appendTextBefore(index);
-        parent.append(holder);
-        index += linkText.length;
-        textStart = index;
-        continue;
+      if (match) {
+        const linkText = trimURLSuffix(match[0]);
+        const holder = document.createDocumentFragment();
+        if (appendLink(holder, linkText, linkText, depth, scanBudget)) {
+          appendTextBefore(index);
+          parent.append(holder);
+          index += linkText.length;
+          textStart = index;
+          continue;
+        }
       }
     }
 
@@ -3680,7 +3682,7 @@ function appendMarkdownBlocks(parent: ParentNode, value: string, depth = 0) {
           listItem.className = 'task-list-item';
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
-          checkbox.checked = task[1].toLowerCase() === 'x';
+          checkbox.defaultChecked = task[1].toLowerCase() === 'x';
           checkbox.disabled = true;
           listItem.append(checkbox);
           itemLines[0] = task[2];
@@ -3718,11 +3720,42 @@ function appendMarkdownBlocks(parent: ParentNode, value: string, depth = 0) {
   }
 }
 
+function reconcileMarkdownChildren(parent: Node, rendered: Node) {
+  const currentChildren = Array.from(parent.childNodes);
+  const renderedChildren = Array.from(rendered.childNodes);
+  renderedChildren.forEach((next, index) => {
+    const current = currentChildren[index];
+    if (!current) {
+      parent.appendChild(next);
+    } else if (current.nodeName !== next.nodeName ||
+      (current instanceof Element && next instanceof Element && current.className !== next.className)) {
+      parent.replaceChild(next, current);
+    } else if (current instanceof Text && next instanceof Text) {
+      if (current.data === next.data) return;
+      if (next.data.startsWith(current.data)) current.appendData(next.data.slice(current.data.length));
+      else current.data = next.data;
+    } else if (current instanceof Element && next instanceof Element) {
+      // Copy feedback and its reset timer belong to the mounted button.
+      if (current.classList.contains('code-copy-button')) return;
+      if (current instanceof HTMLInputElement && next instanceof HTMLInputElement) current.checked = next.checked;
+      if (current.isEqualNode(next)) return;
+      for (const name of current.getAttributeNames()) {
+        if (!next.hasAttribute(name)) current.removeAttribute(name);
+      }
+      for (const name of next.getAttributeNames()) {
+        if (current.getAttribute(name) !== next.getAttribute(name)) current.setAttribute(name, next.getAttribute(name)!);
+      }
+      reconcileMarkdownChildren(current, next);
+    }
+  });
+  for (const current of currentChildren.slice(renderedChildren.length)) parent.removeChild(current);
+}
+
 function renderMessageMarkdown(element, text) {
   const fragment = document.createDocumentFragment();
   appendMarkdownBlocks(fragment, text || '');
 
-  element.replaceChildren(fragment);
+  reconcileMarkdownChildren(element, fragment);
 }
 
 function completedAssistantText(eventText, streamedText) {
@@ -4461,9 +4494,26 @@ function assistantBubble(turnID) {
 function endAssistantSegment(turnID) {
   const key = turnID || 'current';
   const bubble = state.assistantSegmentByTurn.get(key);
-  if (bubble) renderMessageMarkdown(bubble, state.assistantTextByTurn.get(key) || '');
+  if (bubble) finishAssistantMarkdown(bubble, state.assistantTextByTurn.get(key) || '');
   state.assistantSegmentByTurn.delete(key);
   state.assistantTextByTurn.delete(key);
+}
+
+const pendingAssistantRenders = new WeakMap<HTMLElement, {text: string; frame: number}>();
+
+function renderAssistantMarkdown(bubble: HTMLElement, text: string) {
+  const pending = pendingAssistantRenders.get(bubble);
+  if (pending) window.cancelAnimationFrame(pending.frame);
+  pendingAssistantRenders.delete(bubble);
+  const pinToBottom = elements.messages.contains(bubble) &&
+    (state.replayingHistory ? state.pinHistoryToBottom : messagesNearBottom());
+  renderMessageMarkdown(bubble, text);
+  if (pinToBottom) scheduleBottomAnchor();
+}
+
+function finishAssistantMarkdown(bubble: HTMLElement, text: string) {
+  bubble.classList.remove('is-streaming');
+  renderAssistantMarkdown(bubble, text);
 }
 
 function renderAssistantDelta(event) {
@@ -4472,10 +4522,22 @@ function renderAssistantDelta(event) {
   const delta = event.text || '';
   const text = (state.assistantTextByTurn.get(key) || '') + delta;
   state.assistantTextByTurn.set(key, text);
-  const tail = bubble.lastChild;
-  if (tail?.nodeType === 3) (tail as Text).appendData(delta);
-  else bubble.append(document.createTextNode(delta));
-  scrollToBottom();
+  bubble.classList.add('is-streaming');
+  if (state.replayingHistory) {
+    renderAssistantMarkdown(bubble, text);
+    return;
+  }
+  const pending = pendingAssistantRenders.get(bubble);
+  if (pending) {
+    pending.text = text;
+    return;
+  }
+  const update = {text, frame: 0};
+  update.frame = window.requestAnimationFrame(() => {
+    pendingAssistantRenders.delete(bubble);
+    renderAssistantMarkdown(bubble, update.text);
+  });
+  pendingAssistantRenders.set(bubble, update);
 }
 
 function renderAssistantMessage(event) {
@@ -4483,10 +4545,9 @@ function renderAssistantMessage(event) {
   const bubble = assistantBubble(event.turnId);
   const text = completedAssistantText(event.text, state.assistantTextByTurn.get(key));
   state.assistantTextByTurn.set(key, text);
-  renderMessageMarkdown(bubble, text);
+  finishAssistantMarkdown(bubble, text);
   state.assistantSegmentByTurn.delete(key);
   state.assistantTextByTurn.delete(key);
-  scrollToBottom();
 }
 
 function renderTool(event) {
