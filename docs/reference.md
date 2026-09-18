@@ -508,6 +508,11 @@ label, each code block has a copy control, and wide tables and long code lines
 scroll horizontally. Tables that would render more than 10,000 cells remain
 plain text.
 
+Assistant messages render Markdown as text arrives, with a small dot marking
+the response while it is streaming. Copying a code block during streaming
+copies the text received so far. The conversation follows incoming text when
+the reader is near the bottom. Scrolling farther up pauses this automatic scrolling.
+
 If the Session Pod is deleted or evicted, clients reconnect after its
 replacement is ready. Work active at the time of failure is reported as
 interrupted and is not submitted again automatically. The terminal client also

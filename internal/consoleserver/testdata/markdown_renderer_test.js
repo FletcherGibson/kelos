@@ -13,12 +13,16 @@ class TestNode {
     this.listeners = new Map();
     this.style = {};
     this.classes = new Set();
-    this.classList = {add: (...names) => names.forEach((name) => this.classes.add(name))};
+    this.classList = {
+      add: (...names) => names.forEach((name) => this.classes.add(name)),
+      remove: (...names) => names.forEach((name) => this.classes.delete(name)),
+      contains: (name) => this.classes.has(name),
+    };
   }
 
   append(...nodes) {
     for (const node of nodes) {
-      if (node.tag === '#fragment') this.children.push(...node.children);
+      if (node.tag === '#fragment') this.append(...node.children);
       else {
         node.parent = this;
         this.children.push(node);
@@ -31,8 +35,34 @@ class TestNode {
     this.append(...nodes);
   }
 
+  get childNodes() { return this.children; }
+  get nodeName() { return this.tag; }
+  get data() { return this.value; }
+  set data(value) { this.value = value; }
+  appendData(value) { this.value += value; }
+  appendChild(node) { this.append(node); }
+
+  replaceChild(next, current) {
+    this.children[this.children.indexOf(current)] = next;
+    next.parent = this;
+    current.parent = null;
+  }
+
+  removeChild(node) { node.remove(); }
+  contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+  isEqualNode(node) { return serialize(this) === serialize(node); }
+
+  querySelector(selector) {
+    for (const child of this.children) {
+      if (selector.startsWith('.') ? child.classList.contains(selector.slice(1)) : child.tag === selector) return child;
+      const found = child.querySelector(selector);
+      if (found) return found;
+    }
+    return null;
+  }
+
   set textContent(value) {
-    this.children = [new TestNode('#text', String(value))];
+    this.replaceChildren(new TestNode('#text', String(value)));
   }
 
   get textContent() {
@@ -49,8 +79,36 @@ class TestNode {
   }
 
   setAttribute(name, value) {
-    this.attributes.set(name, String(value));
+    if (name === 'class') this.className = value;
+    else if (name === 'data-language') this.dataset.language = value;
+    else if (['href', 'target', 'rel', 'type', 'start'].includes(name)) this[name] = value;
+    else if (name === 'checked' || name === 'disabled') this[name] = true;
+    else this.attributes.set(name, String(value));
   }
+
+  getAttribute(name) {
+    if (name === 'class') return this.className || null;
+    if (name === 'data-language') return this.dataset.language || null;
+    if (['href', 'target', 'rel', 'type', 'start'].includes(name)) return this[name] || null;
+    if (name === 'checked' || name === 'disabled') return this[name] ? '' : null;
+    return this.attributes.get(name) ?? null;
+  }
+
+  getAttributeNames() {
+    return [...new Set([...this.attributes.keys(), 'class', 'data-language', 'href', 'target', 'rel', 'type', 'start', 'checked', 'disabled'])]
+      .filter((name) => this.hasAttribute(name));
+  }
+
+  hasAttribute(name) { return this.getAttribute(name) !== null; }
+
+  removeAttribute(name) {
+    if (name === 'class') this.className = '';
+    else if (name === 'data-language') delete this.dataset.language;
+    else if (['href', 'target', 'rel', 'type', 'start', 'checked', 'disabled'].includes(name)) delete this[name];
+    else this.attributes.delete(name);
+  }
+
+  set defaultChecked(value) { this.checked = value; }
 
   addEventListener(name, listener) {
     this.listeners.set(name, listener);
@@ -71,6 +129,18 @@ class TestNode {
   }
 }
 
+global.Element = class { static [Symbol.hasInstance](node) { return !node.tag.startsWith('#'); } };
+global.Text = class { static [Symbol.hasInstance](node) { return node.tag === '#text'; } };
+global.HTMLInputElement = class { static [Symbol.hasInstance](node) { return node.tag === 'input'; } };
+
+const animationFrames = new Map();
+let nextFrameID = 0;
+function flushAnimationFrames() {
+  const callbacks = [...animationFrames.values()];
+  animationFrames.clear();
+  callbacks.forEach((callback) => callback());
+}
+
 global.document = {
   createElement: (tag) => new TestNode(tag),
   createTextNode: (value) => new TestNode('#text', value),
@@ -81,6 +151,11 @@ global.document = {
 global.window = {
   clearTimeout: () => {},
   setTimeout: () => 1,
+  requestAnimationFrame: (callback) => {
+    animationFrames.set(++nextFrameID, callback);
+    return nextFrameID;
+  },
+  cancelAnimationFrame: (id) => animationFrames.delete(id),
 };
 Object.defineProperty(global, 'navigator', {
   configurable: true,
@@ -95,6 +170,10 @@ global.elements = {messages: new TestNode('div')};
 global.ensureConversation = () => {};
 global.providerInitials = () => 'C';
 global.scrollToBottom = () => {};
+let nearBottom = true;
+let bottomAnchors = 0;
+global.messagesNearBottom = () => nearBottom;
+global.scheduleBottomAnchor = () => { bottomAnchors++; };
 
 function escapeHTML(value) {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
@@ -224,6 +303,8 @@ assert.equal(backtickBudget.remaining, initialBacktickBudget - unmatchedBacktick
 const links = render('[safe](https://example.com/path) HTTPS://example.com/UPPER');
 assert.match(links, /<a href="https:\/\/example.com\/path" target="_blank" rel="noopener noreferrer">safe<\/a>/);
 assert.match(links, /<a href="https:\/\/example.com\/UPPER" target="_blank" rel="noopener noreferrer">HTTPS:\/\/example.com\/UPPER<\/a>/);
+assert.equal(render('http://'), '<div><p>http://</p></div>');
+assert.equal(render('https://'), '<div><p>https://</p></div>');
 
 const untrusted = render([
   '<img src=x onerror=alert(1)>',
@@ -255,6 +336,136 @@ assert.equal(elements.messages.children.length, 1);
 assert.equal(elements.messages.children[0].textContent, 'Ccomplete response');
 assert.equal(state.assistantSegmentByTurn.size, 0);
 assert.equal(state.assistantTextByTurn.size, 0);
+assert.equal(animationFrames.size, 0, 'completion cancels the queued partial render');
+
+function resetStreaming() {
+  assert.equal(animationFrames.size, 0);
+  elements.messages.replaceChildren();
+  state.replayingHistory = false;
+  state.pinHistoryToBottom = false;
+  nearBottom = true;
+  bottomAnchors = 0;
+}
+
+function stream(text, turnId = 'live') {
+  renderAssistantDelta({turnId, text});
+  flushAnimationFrames();
+  return state.assistantSegmentByTurn.get(turnId);
+}
+
+resetStreaming();
+renderAssistantDelta({turnId: 'live', text: '# Heading\n\n'});
+renderAssistantDelta({turnId: 'live', text: '**Visible before completion**'});
+const liveBubble = state.assistantSegmentByTurn.get('live');
+assert.equal(animationFrames.size, 1, 'multiple deltas share a frame');
+assert.equal(liveBubble.textContent, '');
+flushAnimationFrames();
+assert.match(serialize(liveBubble), /<h1>Heading<\/h1><p><strong>Visible before completion<\/strong><\/p>/);
+assert.equal(liveBubble.classList.contains('is-streaming'), true);
+assert.equal(bottomAnchors, 1);
+const headingNode = liveBubble.children[0];
+const paragraphNode = liveBubble.children[1];
+stream('\n\n```js\nconst a = 1;');
+const codeBlock = liveBubble.children[2];
+const preNode = codeBlock.querySelector('pre');
+const copyNode = codeBlock.querySelector('button');
+const codeTextNode = codeBlock.querySelector('code').childNodes[0];
+preNode.scrollLeft = 60;
+stream('\nconst b = 2;\n```\n\nMore text');
+assert.equal(liveBubble.children[0], headingNode);
+assert.equal(liveBubble.children[1], paragraphNode);
+assert.equal(liveBubble.children[2], codeBlock);
+assert.equal(codeBlock.querySelector('pre'), preNode);
+assert.equal(codeBlock.querySelector('button'), copyNode);
+assert.equal(codeBlock.querySelector('code').childNodes[0], codeTextNode);
+assert.equal(preNode.scrollLeft, 60);
+assert.equal(codeBlock.querySelector('code').textContent, 'const a = 1;\nconst b = 2;');
+nearBottom = false;
+const anchorsBeforeScrollingUp = bottomAnchors;
+stream(' while reading earlier messages');
+assert.equal(bottomAnchors, anchorsBeforeScrollingUp, 'streaming does not pull a reader to the bottom');
+renderAssistantMessage({turnId: 'live', text: state.assistantTextByTurn.get('live')});
+assert.equal(liveBubble.children[2], codeBlock, 'completion preserves mounted blocks');
+assert.equal(liveBubble.classList.contains('is-streaming'), false);
+assert.equal(bottomAnchors, anchorsBeforeScrollingUp);
+
+resetStreaming();
+const tableBubble = stream('| Name | Status |\n');
+assert.equal(tableBubble.querySelector('table'), null);
+stream('| --- | --- |\n| Build | Running |\n');
+const tableContainer = tableBubble.children[0];
+const tableNode = tableBubble.querySelector('table');
+const headerNode = tableBubble.querySelector('thead');
+const firstRow = tableBubble.querySelector('tbody').children[0];
+tableContainer.scrollLeft = 40;
+stream('| Tests | Pending |\n');
+assert.equal(tableBubble.children[0], tableContainer);
+assert.equal(tableBubble.querySelector('table'), tableNode);
+assert.equal(tableBubble.querySelector('thead'), headerNode);
+assert.equal(tableBubble.querySelector('tbody').children[0], firstRow);
+assert.equal(tableContainer.scrollLeft, 40);
+assert.match(serialize(tableBubble), /<tr><td>Tests<\/td><td>Pending<\/td><\/tr>/);
+endAssistantSegment('live');
+
+resetStreaming();
+const partialBubble = stream('**Bold');
+assert.equal(partialBubble.textContent, '**Bold');
+stream('** and [docs](https://example.com');
+assert.equal(partialBubble.querySelector('strong').textContent, 'Bold');
+stream(')');
+assert.equal(partialBubble.querySelector('a').textContent, 'docs');
+assert.equal(partialBubble.querySelector('a').href, 'https://example.com/');
+endAssistantSegment('live');
+
+const chunkedMarkdown = [
+  '# Heading\n\nParagraph **bold** and *italic* with [link](https://example.com).\n\nNext paragraph.',
+  '```js\n\nconst a = 1;\n\nconst b = 2;\n```\n\nAfter code.',
+  '~~~python\nprint("hello")\n~~~\n\n    indented code\n\nAfter code.',
+  '> A quote\n> with `code`\n\n- [x] Done\n  - Nested\n- [ ] Pending\n\n1. First\n2. Second',
+  '| Name | Value |\n| --- | ---: |\n| a | 1 |\n| b | 2 |\n\nAfter table.',
+  'Paragraph\n```info`invalid\n\n---\n\n<img src=x onerror=alert(1)>\n\n[bad](javascript:alert(1))',
+];
+for (const markdown of chunkedMarkdown) {
+  resetStreaming();
+  let bubble;
+  for (const character of markdown) bubble = stream(character);
+  assert.equal(`<div>${bubble.children.map(serialize).join('')}</div>`, render(markdown));
+  endAssistantSegment('live');
+}
+
+resetStreaming();
+const interrupted = stream('```sh\nprintf hello');
+renderAssistantDelta({turnId: 'live', text: '\nprintf world'});
+endAssistantSegment('live');
+assert.equal(animationFrames.size, 0);
+assert.equal(interrupted.querySelector('code').textContent, 'printf hello\nprintf world');
+assert.equal(interrupted.classList.contains('is-streaming'), false);
+assert.equal(state.assistantSegmentByTurn.size, 0);
+
+resetStreaming();
+renderAssistantDelta({turnId: 'live', text: 'queued '});
+state.replayingHistory = true;
+renderAssistantDelta({turnId: 'live', text: '**history**'});
+const historyBubble = state.assistantSegmentByTurn.get('live');
+assert.equal(animationFrames.size, 0, 'history renders synchronously and cancels queued work');
+assert.equal(historyBubble.querySelector('strong').textContent, 'history');
+assert.equal(bottomAnchors, 0, 'older history does not schedule bottom anchoring');
+state.pinHistoryToBottom = true;
+renderAssistantDelta({turnId: 'live', text: ' tail'});
+assert.equal(bottomAnchors, 1);
+endAssistantSegment('live');
+
+resetStreaming();
+renderAssistantDelta({turnId: 'cached', text: '**Cached session**'});
+const cachedBubble = state.assistantSegmentByTurn.get('cached');
+const currentMessages = elements.messages;
+elements.messages = new TestNode('div');
+flushAnimationFrames();
+assert.equal(cachedBubble.querySelector('strong').textContent, 'Cached session');
+assert.equal(elements.messages.textContent, '');
+assert.equal(bottomAnchors, 0, 'a cached session cannot scroll the selected session');
+endAssistantSegment('cached');
+elements.messages = currentMessages;
 
 async function testCodeBlockCopy() {
   const copied = [];
@@ -287,6 +498,20 @@ async function testCodeBlockCopy() {
   await writeClipboardText('fallback content');
   assert.equal(fallbackValue, 'fallback content');
   assert.equal(document.body.children.length, 0);
+
+  resetStreaming();
+  global.navigator.clipboard.writeText = async (value) => copied.push(value);
+  const bubble = stream('```js\nfirst');
+  const streamingButton = bubble.querySelector('button');
+  await streamingButton.click();
+  stream('\nsecond');
+  assert.equal(bubble.querySelector('button'), streamingButton);
+  assert.equal(streamingButton.textContent, 'Copied', 'streaming preserves copy feedback');
+  await streamingButton.click();
+  assert.equal(copied.at(-1), 'first\nsecond', 'copy reads the current code');
+  renderAssistantMessage({turnId: 'live', text: '```js\nreplacement\n```'});
+  await streamingButton.click();
+  assert.equal(copied.at(-1), 'replacement', 'copy reads the authoritative final text');
 }
 
 testCodeBlockCopy().then(
