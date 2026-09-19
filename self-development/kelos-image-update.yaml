@@ -32,7 +32,7 @@ spec:
     worker:
       workspaceRef:
         name: kelos-agent
-      model: gpt-5.4-mini
+      model: gpt-5.6-luna
       effort: medium
       type: codex
       credentials:
