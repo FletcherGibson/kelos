@@ -33,9 +33,9 @@ spec:
     worker:
       workspaceRef:
         name: kelos-session-agent
-      model: gpt-6-astra
+      model: opus
       effort: xhigh
-      type: codex
+      type: claude-code
       credentials:
         type: oauth
         secretRef:
